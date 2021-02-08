@@ -105,15 +105,3 @@ class SsDt:
         pass
 
 
-dt = SsDt(os.getenv('SMRT_API'))
-dtwoids = dt.get_dt_transfer_wo()
-print(dtwoids)
-dt_dict = dt.get_confluence_woid_data(dtwoids)
-
-print(dt_dict)
-
-for k, v in dt_dict.items():
-    print(k)
-    for k2, v2 in v.items():
-        print(k2, ': ', v2)
-    print()
