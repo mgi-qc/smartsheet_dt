@@ -20,10 +20,13 @@ class SsDt:
         self.dt_sheet_id = 5216932677871492
         self.confluence_sheet_id = 3521933800171396
 
-        self.confluence_fields = ['Work Order ID', 'MGI QC', 'Transfer To GTAC', 'Method of Transfer',
-                                  'Analysis/Transfer Instructions', 'Data Recipients', 'Deliverables', 'Pipeline',
-                                  'Administration Project', 'Description', 'Billing Account', 'Facilitator', 'Assay',
+        self.dt_fields = ['Manual Demux']
+
+        self.confluence_fields = ['MGI QC', 'Transfer To GTAC', 'Method of Transfer', 'Analysis/Transfer Instructions',
+                                  'Data Recipients', 'Deliverables', 'Pipeline', 'Administration Project',
+                                  'Description', 'Billing Account', 'Facilitator', 'Assay',
                                   'Novel Processing Considerations', 'Production Processing Comments']
+
         # Smartsheet test
         try:
             self.ss.Sheets.get_sheet(self.dt_sheet_id)
@@ -58,11 +61,11 @@ class SsDt:
                         woid = str(cell.value)
                         if '.' in woid:
                             woid = woid.split('.')[0]
-                            dt_woids[woid] = dict()
+                        dt_woids[woid] = dict()
+                        continue
 
-                    if cell.column_id == col_ids['Manual Demux'] and woid:
-                        dt_woids[woid] = {'Manual Demux': cell.value}
-                        break
+                    if woid and col_ids[cell.column_id] in self.dt_fields:
+                        dt_woids[woid][col_ids[cell.column_id]] = cell.value
 
         return dt_woids
 
@@ -80,7 +83,8 @@ class SsDt:
 
                 if cell.column_id == confluence_col_ids['Work Order ID'] and cell.value in woid_dict:
                     woid = cell.value
-                    dt_woid_dict[woid] = {**woid_dict[woid], **dict.fromkeys(self.confluence_fields[1:], 'NA')}
+                    dt_woid_dict[woid] = {**woid_dict[woid]}
+                    continue
 
                 if woid and confluence_col_ids[cell.column_id] in self.confluence_fields:
                     dt_woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
@@ -103,5 +107,3 @@ class SsDt:
         # dt complete date/status for ssf?
         # qc status for large scale, no dt date
         pass
-
-
