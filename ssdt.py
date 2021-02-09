@@ -72,7 +72,6 @@ class SsDt:
     def get_confluence_woid_data(self, woid_dict: dict) -> dict:
         """:return: dict with confluence woid information {woid: {confluence}}"""
 
-        dt_woid_dict = {}
         confluence_col_ids = self.get_column_ids(self.confluence_sheet_id)
 
         for row in self.ss.Sheets.get_sheet(self.confluence_sheet_id).rows:
@@ -83,13 +82,12 @@ class SsDt:
 
                 if cell.column_id == confluence_col_ids['Work Order ID'] and cell.value in woid_dict:
                     woid = cell.value
-                    dt_woid_dict[woid] = {**woid_dict[woid]}
                     continue
 
                 if woid and confluence_col_ids[cell.column_id] in self.confluence_fields:
-                    dt_woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
+                    woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
 
-        return dt_woid_dict
+        return woid_dict
 
     def run_dt(self, confluence_dict: dict) -> bool:
         # run:
