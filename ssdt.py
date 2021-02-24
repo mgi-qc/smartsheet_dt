@@ -1,5 +1,6 @@
 import sys
 import os
+import requests
 import subprocess
 import smartsheet
 
@@ -33,6 +34,9 @@ class SsDt:
         except Exception as e:
             print('Error: failed to connect to DT sheet - {}'.format(e.message))
 
+    def remascii(self, s: str) -> str:
+        return "".join(i for i in s if ord(i) < 128)
+
     def get_column_ids(self, sheet_id: int) -> dict:
         """:return: dict of {column_title: column_id} and {column_id: column_title}"""
 
@@ -64,8 +68,33 @@ class SsDt:
                         dt_woids[woid] = dict()
                         continue
 
-                    if woid and col_ids[cell.column_id] in self.dt_fields:
-                        dt_woids[woid][col_ids[cell.column_id]] = cell.value
+                    if woid:
+
+                        if cell.column_id == col_ids['Data Transfer Stage'] and cell.value == 'QC@MGI Complete':
+
+                            attachment_names = []
+
+                            for atch in self.ss.Attachments.list_row_attachments(self.dt_sheet_id, row.id).data:
+
+                                try:
+                                    url_res = requests.get(self.ss.Attachments.get_attachment(self.dt_sheet_id,
+                                                                                              atch.id).url, atch.name)
+                                except requests.exceptions.RequestException as e:
+                                    sys.exit('Error: {} attachment failed to download\n'.format(atch.name, e))
+
+                                if url_res:
+                                    with open(atch.name, 'wb') as f:
+                                        f.write(url_res.content)
+
+                                attachment_names.append(atch.name)
+
+                            dt_woids[woid][col_ids[cell.column_id]] = cell.value
+                            dt_woids[woid]['qc_files'] = attachment_names
+
+                            continue
+
+                        if col_ids[cell.column_id] in self.dt_fields:
+                            dt_woids[woid][col_ids[cell.column_id]] = cell.value
 
         return dt_woids
 
@@ -84,8 +113,18 @@ class SsDt:
                     woid = cell.value
                     continue
 
-                if woid and confluence_col_ids[cell.column_id] in self.confluence_fields:
-                    woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
+                if woid:
+                    
+                    if cell.column_id == confluence_col_ids['Production Processing Comments'] and cell.value:
+                        woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
+                        continue
+
+                    if cell.column_id == confluence_col_ids['Analysis/Transfer Instructions'] and cell.value:
+                        woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
+                        continue
+
+                    if confluence_col_ids[cell.column_id] in self.confluence_fields:
+                        woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
 
         return woid_dict
 
