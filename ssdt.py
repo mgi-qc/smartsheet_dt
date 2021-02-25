@@ -70,25 +70,27 @@ class SsDt:
 
                     if woid:
 
-                        if cell.column_id == col_ids['Data Transfer Stage'] and cell.value == 'QC@MGI Complete':
+                        if cell.column_id == col_ids['Data Transfer Stage']:
 
                             attachment_names = []
-
-                            for atch in self.ss.Attachments.list_row_attachments(self.dt_sheet_id, row.id).data:
-
-                                try:
-                                    url_res = requests.get(self.ss.Attachments.get_attachment(self.dt_sheet_id,
-                                                                                              atch.id).url, atch.name)
-                                except requests.exceptions.RequestException as e:
-                                    sys.exit('Error: {} attachment failed to download\n'.format(atch.name, e))
-
-                                if url_res:
-                                    with open(atch.name, 'wb') as f:
-                                        f.write(url_res.content)
-
-                                attachment_names.append(atch.name)
-
                             dt_woids[woid][col_ids[cell.column_id]] = cell.value
+
+                            if cell.value == 'QC@MGI Complete':
+
+                                for atch in self.ss.Attachments.list_row_attachments(self.dt_sheet_id, row.id).data:
+
+                                    try:
+                                        url_res = requests.get(self.ss.Attachments.get_attachment(self.dt_sheet_id,
+                                                                                                  atch.id).url, atch.name)
+                                    except requests.exceptions.RequestException as e:
+                                        sys.exit('Error: {} attachment failed to download\n'.format(atch.name, e))
+
+                                    if url_res:
+                                        with open(atch.name, 'wb') as f:
+                                            f.write(url_res.content)
+
+                                    attachment_names.append(atch.name)
+
                             dt_woids[woid]['qc_files'] = attachment_names
 
                             continue
