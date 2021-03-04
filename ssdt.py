@@ -1,41 +1,50 @@
+#!/usr/bin/python3
 import sys
-import os
 import requests
-import subprocess
 import smartsheet
+from collections import namedtuple
+from datetime import datetime
 
-if sys.version_info[0] < 3 and sys.version_info[1] < 5:
-    sys.exit('Error: this script requires Python3.5')
+
+class Error(Exception):
+    """This allows for custom messages when raising exceptions"""
 
 
 class SsDt:
-
-    def __init__(self, api_key):
-
-        if api_key is None:
-            sys.exit('Error: API key is none')
-
-        self.ss = smartsheet.Smartsheet(api_key)
+    """
+    dt_fields, confluence_fields
+        -both are list of strings that act as dictionary keys and SS column IDs
+    """
+    def __init__(self, dt_fields, confluence_fields):
+        self.api_key = ""
+        self.ss = smartsheet.Smartsheet("")
         self.ss.errors_as_exceptions(True)
-
         self.dt_sheet_id = 5216932677871492
         self.confluence_sheet_id = 3521933800171396
+        self.active_projects_folder_id = 3274710231345028
+        self.date = datetime.now().isoformat()
+        #going to pass these
+        self.dt_fields = confluence_fields
+        self.confluence_fields = confluence_fields
 
-        self.dt_fields = ['Manual Demux']
+        should_check_env = False
+        self.check_env(should_check_env)
 
-        self.confluence_fields = ['MGI QC', 'Transfer To GTAC', 'Method of Transfer', 'Analysis/Transfer Instructions',
-                                  'Data Recipients', 'Deliverables', 'Pipeline', 'Administration Project',
-                                  'Description', 'Billing Account', 'Facilitator', 'Assay',
-                                  'Novel Processing Considerations', 'Production Processing Comments']
+    def remascii(self, s: str) -> str:
+        return "".join(i for i in s if ord(i) < 128)
+
+    def check_env(self, should_check_env: bool):
+
+        if sys.version_info[0] < 3 or sys.version_info[1] < 5:
+            s = 'Error: this script requires Python3.5'
+            raise Error(s)
 
         # Smartsheet test
         try:
             self.ss.Sheets.get_sheet(self.dt_sheet_id)
         except Exception as e:
-            print('Error: failed to connect to DT sheet - {}'.format(e.message))
-
-    def remascii(self, s: str) -> str:
-        return "".join(i for i in s if ord(i) < 128)
+            s = 'Error: failed to connect to DT sheet - {}'.format(e.message)
+            raise Error(s)
 
     def get_column_ids(self, sheet_id: int) -> dict:
         """:return: dict of {column_title: column_id} and {column_id: column_title}"""
@@ -70,27 +79,26 @@ class SsDt:
 
                     if woid:
 
-                        if cell.column_id == col_ids['Data Transfer Stage']:
+                        if cell.column_id == col_ids['Data Transfer Stage'] and cell.value == 'QC@MGI Complete':
 
                             attachment_names = []
+
+                            for atch in self.ss.Attachments.list_row_attachments(self.dt_sheet_id, row.id).data:
+
+                                try:
+                                    url_res = requests.get(self.ss.Attachments.get_attachment(self.dt_sheet_id,
+                                                                                              atch.id).url, atch.name)
+                                except requests.exceptions.RequestException as e:
+                                    s = 'Error: {} attachment failed to download\n{}'.format(atch.name, e)
+                                    raise Error(s)
+
+                                if url_res:
+                                    with open(atch.name, 'wb') as f:
+                                        f.write(url_res.content)
+
+                                attachment_names.append(atch.name)
+
                             dt_woids[woid][col_ids[cell.column_id]] = cell.value
-
-                            if cell.value == 'QC@MGI Complete':
-
-                                for atch in self.ss.Attachments.list_row_attachments(self.dt_sheet_id, row.id).data:
-
-                                    try:
-                                        url_res = requests.get(self.ss.Attachments.get_attachment(self.dt_sheet_id,
-                                                                                                  atch.id).url, atch.name)
-                                    except requests.exceptions.RequestException as e:
-                                        sys.exit('Error: {} attachment failed to download\n'.format(atch.name, e))
-
-                                    if url_res:
-                                        with open(atch.name, 'wb') as f:
-                                            f.write(url_res.content)
-
-                                    attachment_names.append(atch.name)
-
                             dt_woids[woid]['qc_files'] = attachment_names
 
                             continue
@@ -130,19 +138,145 @@ class SsDt:
 
         return woid_dict
 
-    def run_dt(self, confluence_dict: dict) -> bool:
-        # run:
-        # /gscuser/acemory/globus_dt_pipeline/stage_and_transfer_dt.py
+    def complete_wo_dt_con(self, woid: str, dt_pass: bool) -> tuple:
+        """
+        :return: namedtuple with  woid and dt/con row completed status True/False.
+        """
+
+        Results = namedtuple('Results', ['woid', 'dt', 'confluence', 'admin'])
+        dt_result = False
+        con_result = False
+        admin = None
+
+        # Complete work order in DT
+        dt_col_ids = self.get_column_ids(self.dt_sheet_id)
+        dt_row_found = False
+        dt_update = False
+        dt_row_updated = False
+
+        for row in self.ss.Sheets.get_sheet(self.dt_sheet_id).rows:
+
+            if not dt_row_updated:
+
+                for cell in row.cells:
+
+                    if cell.column_id == dt_col_ids['Work Order ID']:
+                        w = str(cell.value)
+                        if '.' in w:
+                            w = w.split('.')[0]
+                        if w == woid:
+                            dt_row_found = True
+
+                    if dt_row_found:
+
+                        updated_row = self.ss.models.Row()
+                        updated_row.id = row.id
+
+                        if cell.column_id == dt_col_ids['Move to CDT (completed DT)'] and dt_pass:
+                            updated_row.cells.append({'column_id': cell.column_id, 'value': True})
+                            updated_row.cells.append({'column_id': dt_col_ids['Data Transfer Completed Date'],
+                                                      'value': self.date})
+                            dt_update = True
+
+                        if cell.column_id == dt_col_ids['Data Transfer Stage'] and not dt_pass:
+                            updated_row.cells.append({'column_id': cell.column_id, 'object_value': 'Failed auto-DT'})
+                            dt_update = True
+
+                        if dt_update:
+                            resp = self.ss.Sheets.update_rows(self.dt_sheet_id, [updated_row])
+                            if resp.message == 'SUCCESS':
+                                dt_result = True
+                            dt_row_updated = True
+
+        # Complete work order in Confluence
+        con_col_ids = self.get_column_ids(self.confluence_sheet_id)
+        con_row_found = False
+        con_update = False
+        con_row_updated = False
+
+        for row in self.ss.Sheets.get_sheet(self.confluence_sheet_id).rows:
+
+            updated_row = self.ss.models.Row()
+            updated_row.id = row.id
+
+            for cell in row.cells:
+
+                if not con_row_updated:
+
+                    if cell.column_id == con_col_ids['Work Order ID']:
+                        w = str(cell.value)
+                        if '.' in w:
+                            w = w.split('.')[0]
+                        if w == woid:
+                            con_row_found = True
+
+                    if con_row_found:
+
+                        if cell.column_id == con_col_ids['Work Order Complete'] and con_row_found:
+                            updated_row.cells.append({'column_id': cell.column_id, 'value': True})
+                            updated_row.cells.append({'column_id': con_col_ids['Data Transfer Complete'],
+                                                      'value': self.date})
+
+                        if cell.column_id == con_col_ids['Data Transfer Information'] and not dt_pass:
+                            updated_row.cells.append({'column_id': cell.column_id, 'object_value': 'Human Needed'})
+
+                        if cell.column_id == con_col_ids['Administration Project'] and con_row_found:
+                            admin = cell.value[:50]
+                            con_update = True
+
+                        if con_update:
+                            resp = self.ss.Sheets.update_rows(self.confluence_sheet_id, [updated_row])
+                            if resp.message == 'SUCCESS':
+                                con_result = True
+                            con_row_updated = True
+
+        return Results(woid, dt_result, con_result, admin)
+
+    def update_dt_mss(self, result_tuple: tuple) -> bool:
+        """
+        :return: Update MSS sheet row status 'Data Trasnfer Completed' add DT date, True if SUCCESS, False if not.
+        """
+
+        if result_tuple.admin is not None:
+
+            for folder in self.ss.Folders.get_folder(self.active_projects_folder_id).folders:
+
+                if folder.name == result_tuple.admin:
+
+                    for sheet in self.ss.Folders.get_folder(folder.id).sheets:
+
+                        sheet_col_ids = self.get_column_ids(sheet.id)
+                        updated_rows = []
+
+                        for row in self.ss.Sheets.get_sheet(sheet.id).rows:
+
+                            woid_found = False
+
+                            for cell in row.cells:
+
+                                if not woid_found:
+
+                                    if cell.column_id == sheet_col_ids['Work Order ID'] \
+                                            and cell.value == result_tuple.woid:
+
+                                        updated_row = self.ss.models.Row()
+                                        updated_row.id = row.id
+                                        updated_row.cells.append(
+                                            {'column_id': sheet_col_ids['Current Production Status'],
+                                             'value': 'Data Transfer Completed'})
+                                        updated_row.cells.append(
+                                            {'column_id': sheet_col_ids['Data Transfer Completed Date'],
+                                             'value': self.date})
+
+                                        updated_rows.append(updated_row)
+                                        woid_found = True
+
+                        if len(updated_rows) > 0:
+                            resp = self.ss.Sheets.update_rows(sheet.id, updated_rows)
+                            if resp.message == 'SUCCESS':
+                                return True
+                            else:
+                                return False
         return False
 
-    def complete_work_order_in_dt(self):
-        # check dt complete for work orders with successful run dt
-        pass
 
-    def update_dt_complete_tracking_sheets(self):
-        pass
-
-    def update_dt_mss(self):
-        # dt complete date/status for ssf?
-        # qc status for large scale, no dt date
-        pass
