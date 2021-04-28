@@ -1,10 +1,14 @@
 #!/usr/bin/python3
+
 import sys
+import os
 import requests
 import smartsheet
+
 from collections import namedtuple
 from datetime import datetime
 
+from dt import ConfluenceDTAttributes, DTDTAttributes
 
 class Error(Exception):
     """This allows for custom messages when raising exceptions"""
@@ -15,17 +19,22 @@ class SsDt:
     dt_fields, confluence_fields
         -both are list of strings that act as dictionary keys and SS column IDs
     """
-    def __init__(self, dt_fields, confluence_fields):
-        self.api_key = ""
-        self.ss = smartsheet.Smartsheet("")
+
+    # def __init__(self, dt_fields, confluence_fields):
+    def __init__(self):
+        self.api_key = "uqm83gasjaa79dm2l7dfpau55o"
+        self.ss = smartsheet.Smartsheet("uqm83gasjaa79dm2l7dfpau55o")
         self.ss.errors_as_exceptions(True)
         self.dt_sheet_id = 5216932677871492
         self.confluence_sheet_id = 3521933800171396
         self.active_projects_folder_id = 3274710231345028
+        # going to pass these
+        # self.dt_fields = confluence_fields
+        # self.confluence_fields = confluence_fields
+        self.dt_fields = DTDTAttributes().values
+        self.confluence_fields = ConfluenceDTAttributes().values
+
         self.date = datetime.now().isoformat()
-        #going to pass these
-        self.dt_fields = confluence_fields
-        self.confluence_fields = confluence_fields
 
         should_check_env = False
         self.check_env(should_check_env)
@@ -33,8 +42,7 @@ class SsDt:
     def remascii(self, s: str) -> str:
         return "".join(i for i in s if ord(i) < 128)
 
-    def check_env(self, should_check_env: bool):
-
+    def check_env(self, should_check_env):
         if sys.version_info[0] < 3 or sys.version_info[1] < 5:
             s = 'Error: this script requires Python3.5'
             raise Error(s)
@@ -86,17 +94,20 @@ class SsDt:
                             for atch in self.ss.Attachments.list_row_attachments(self.dt_sheet_id, row.id).data:
 
                                 try:
+                                    #
                                     url_res = requests.get(self.ss.Attachments.get_attachment(self.dt_sheet_id,
                                                                                               atch.id).url, atch.name)
                                 except requests.exceptions.RequestException as e:
-                                    s = 'Error: {} attachment failed to download\n{}'.format(atch.name, e)
+                                    s = 'Error: {} attachment failed to download\n'.format(atch.name, e)
                                     raise Error(s)
 
                                 if url_res:
                                     with open(atch.name, 'wb') as f:
                                         f.write(url_res.content)
 
-                                attachment_names.append(atch.name)
+                                attachment_dir = "/gscmnt/gc5000/download/DT-ATTACHMENTS/"
+                                attach_name = os.path.join(attachment_dir, atch.name)
+                                attachment_names.append(attach_name)
 
                             dt_woids[woid][col_ids[cell.column_id]] = cell.value
                             dt_woids[woid]['qc_files'] = attachment_names
@@ -105,6 +116,8 @@ class SsDt:
 
                         if col_ids[cell.column_id] in self.dt_fields:
                             dt_woids[woid][col_ids[cell.column_id]] = cell.value
+        # TESTING
+        # print("len(dt_woids): %s" % str(len(dt_woids)))
 
         return dt_woids
 
@@ -120,21 +133,51 @@ class SsDt:
             for cell in row.cells:
 
                 if cell.column_id == confluence_col_ids['Work Order ID'] and cell.value in woid_dict:
+                    # print("woid: %s" % str(cell.value))
+                    # print("type: %s" % str(type(cell.value)))
+
                     woid = cell.value
                     continue
 
                 if woid:
-                    
-                    if cell.column_id == confluence_col_ids['Production Processing Comments'] and cell.value:
-                        woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
-                        continue
-
-                    if cell.column_id == confluence_col_ids['Analysis/Transfer Instructions'] and cell.value:
-                        woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
-                        continue
 
                     if confluence_col_ids[cell.column_id] in self.confluence_fields:
                         woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
+
+                    if cell.column_id == confluence_col_ids['Production Processing Comments']:
+                        if cell.value:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
+                        else:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = ""
+                        continue
+
+                    if cell.column_id == confluence_col_ids['Analysis/Transfer Instructions']:
+                        if cell.value:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
+                        else:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = ""
+                        continue
+
+                    if cell.column_id == confluence_col_ids['Sequencing Recipe']:
+                        if cell.value:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
+                        else:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = ""
+                        continue
+
+                    if cell.column_id == confluence_col_ids['Kit Version']:
+                        if cell.value:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = self.remascii(cell.value)
+                        else:
+                            woid_dict[woid][confluence_col_ids[cell.column_id]] = ""
+                        continue
+
+                    # moving to the top of this block as I think having it down here defeats the purpose of the above resmasciis
+                    # if confluence_col_ids[cell.column_id] in self.confluence_fields:
+                    #     woid_dict[woid][confluence_col_ids[cell.column_id]] = cell.value
+
+        # TESTING
+        # print("len(woid_dict): %s" % str(len(woid_dict)))
 
         return woid_dict
 
@@ -204,31 +247,34 @@ class SsDt:
                 if not con_row_updated:
 
                     if cell.column_id == con_col_ids['Work Order ID']:
+
                         w = str(cell.value)
+
                         if '.' in w:
                             w = w.split('.')[0]
+
                         if w == woid:
+
+                            if dt_pass:
+                                updated_row.cells.append({'column_id': con_col_ids['Work Order Complete'],
+                                                          'value': True})
+                                updated_row.cells.append({'column_id': con_col_ids['Data Transfer Complete'],
+                                                          'value': self.date})
+
+                            if not dt_pass:
+                                updated_row.cells.append({'column_id': con_col_ids['Data Transfer Information'],
+                                                          'object_value': 'Human Needed'})
                             con_row_found = True
 
-                    if con_row_found:
+                    if cell.column_id == con_col_ids['Administration Project'] and con_row_found:
+                        admin = cell.value[:50]
+                        con_update = True
 
-                        if cell.column_id == con_col_ids['Work Order Complete'] and con_row_found:
-                            updated_row.cells.append({'column_id': cell.column_id, 'value': True})
-                            updated_row.cells.append({'column_id': con_col_ids['Data Transfer Complete'],
-                                                      'value': self.date})
-
-                        if cell.column_id == con_col_ids['Data Transfer Information'] and not dt_pass:
-                            updated_row.cells.append({'column_id': cell.column_id, 'object_value': 'Human Needed'})
-
-                        if cell.column_id == con_col_ids['Administration Project'] and con_row_found:
-                            admin = cell.value[:50]
-                            con_update = True
-
-                        if con_update:
-                            resp = self.ss.Sheets.update_rows(self.confluence_sheet_id, [updated_row])
-                            if resp.message == 'SUCCESS':
-                                con_result = True
-                            con_row_updated = True
+                    if con_update:
+                        resp = self.ss.Sheets.update_rows(self.confluence_sheet_id, [updated_row])
+                        if resp.message == 'SUCCESS':
+                            con_result = True
+                        con_row_updated = True
 
         return Results(woid, dt_result, con_result, admin)
 
@@ -258,7 +304,6 @@ class SsDt:
 
                                     if cell.column_id == sheet_col_ids['Work Order ID'] \
                                             and cell.value == result_tuple.woid:
-
                                         updated_row = self.ss.models.Row()
                                         updated_row.id = row.id
                                         updated_row.cells.append(
