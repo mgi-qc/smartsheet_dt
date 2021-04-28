@@ -22,8 +22,7 @@ class SsDt:
 
     # def __init__(self, dt_fields, confluence_fields):
     def __init__(self):
-        self.api_key = "uqm83gasjaa79dm2l7dfpau55o"
-        self.ss = smartsheet.Smartsheet("uqm83gasjaa79dm2l7dfpau55o")
+        self.ss = smartsheet.Smartsheet("")
         self.ss.errors_as_exceptions(True)
         self.dt_sheet_id = 5216932677871492
         self.confluence_sheet_id = 3521933800171396
