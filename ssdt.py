@@ -192,7 +192,6 @@ class SsDt:
 
         # Complete work order in DT
         dt_col_ids = self.get_column_ids(self.dt_sheet_id)
-        dt_row_found = False
         dt_update = False
         dt_row_updated = False
 
@@ -203,32 +202,34 @@ class SsDt:
                 for cell in row.cells:
 
                     if cell.column_id == dt_col_ids['Work Order ID']:
+
                         w = str(cell.value)
+
                         if '.' in w:
                             w = w.split('.')[0]
+
                         if w == woid:
-                            dt_row_found = True
 
-                    if dt_row_found:
+                            updated_row = self.ss.models.Row()
+                            updated_row.id = row.id
 
-                        updated_row = self.ss.models.Row()
-                        updated_row.id = row.id
+                            if dt_pass:
+                                updated_row.cells.append({'column_id': dt_col_ids['Move to CDT (completed DT)'],
+                                                          'value': True})
+                                updated_row.cells.append({'column_id': dt_col_ids['Data Transfer Completed Date'],
+                                                          'value': self.date})
+                                dt_update = True
 
-                        if cell.column_id == dt_col_ids['Move to CDT (completed DT)'] and dt_pass:
-                            updated_row.cells.append({'column_id': cell.column_id, 'value': True})
-                            updated_row.cells.append({'column_id': dt_col_ids['Data Transfer Completed Date'],
-                                                      'value': self.date})
-                            dt_update = True
+                            if not dt_pass:
+                                updated_row.cells.append({'column_id': dt_col_ids['Data Transfer Stage'],
+                                                          'object_value': 'Failed auto-DT'})
+                                dt_update = True
 
-                        if cell.column_id == dt_col_ids['Data Transfer Stage'] and not dt_pass:
-                            updated_row.cells.append({'column_id': cell.column_id, 'object_value': 'Failed auto-DT'})
-                            dt_update = True
-
-                        if dt_update:
-                            resp = self.ss.Sheets.update_rows(self.dt_sheet_id, [updated_row])
-                            if resp.message == 'SUCCESS':
-                                dt_result = True
-                            dt_row_updated = True
+                if dt_update:
+                    resp = self.ss.Sheets.update_rows(self.dt_sheet_id, [updated_row])
+                    if resp.message == 'SUCCESS':
+                        dt_result = True
+                    dt_row_updated = True
 
         # Complete work order in Confluence
         con_col_ids = self.get_column_ids(self.confluence_sheet_id)
@@ -322,5 +323,3 @@ class SsDt:
                             else:
                                 return False
         return False
-
-
